@@ -1,0 +1,67 @@
+title: "SpanCategorizer project using KC techcomments"
+description: ""
+spacy_version: ">=3.1.0,<4.0.0"
+
+vars:
+  config: "spancat_config"  # "ner"
+  gpu: 0
+  lang: "en"
+  spans_key: "sc"
+
+directories: ["assets", "training", "configs", "metrics", "corpus"]
+
+assets:
+  - dest: "data"
+
+workflows:
+  all:
+    - corpus
+    - train
+    - evaluate
+
+commands:
+
+  - name: corpus
+    help: "Convert the data to spaCy's format"
+    script:
+      - "poetry run python -m spacy convert ./data/dev.conll ./data --lang ${vars.lang} -t spacy"
+      - "poetry run python -m spacy convert ./data/train.conll ./data --lang ${vars.lang} -t spacy"
+      - "poetry run python ./scripts/add_ents_to_spans_dict.py ./data/train.spacy ${vars.lang} ${vars.spans_key}"
+      - "poetry run python ./scripts/add_ents_to_spans_dict.py ./data/dev.spacy ${vars.lang} ${vars.spans_key}"
+    deps:
+      - "scripts/add_ents_to_spans_dict.py"
+      - "data/train.conll"
+      - "data/dev.conll"
+    outputs:
+      - "data/train.spacy"
+      - "data/dev.spacy"
+
+  - name: train
+    help: "Train the pipeline"
+    script:
+      - "python -m spacy train configs/${vars.config}.cfg -o ./spancat_output/ --gpu-id ${vars.gpu} --paths.train data/train.spacy --paths.dev data/dev.spacy"
+    deps:
+      - "data/train.spacy"
+      - "data/dev.spacy"
+      - "configs/${vars.config}.cfg"
+    outputs:
+      - "training/model-best"
+
+  # TODO fix for spancat
+  - name: evaluate
+    help: "Evaluate on the test data and save the metrics"
+    script:
+      - "python scripts/evaluate.py ./spancat_output/model-best ./data/dev.spacy --output ./metrics/${vars.config}.json --gpu-id ${vars.gpu} --spans-key ${vars.spans_key}"
+    deps:
+      - "spancat_output/model-best"
+      - "data/dev.spacy"
+      - "scripts/evaluate.py"
+    outputs:
+      - "metrics/${vars.config}.json"
+
+  - name: clean
+    help: "Remove intermediate files"
+    script:
+      - "rm -rf spancat_output/*"
+      - "rm -rf metrics/*"
+      - "rm -rf corpus/*"
